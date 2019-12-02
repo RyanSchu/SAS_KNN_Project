@@ -1,0 +1,233 @@
+---
+title: "SAS KNN project"
+author: "Ryan Schubert"
+date: "November 2, 2019"
+output: html_document
+---
+
+```{r}
+install.packages("tau")
+install.packages("tm")
+install.packages("cluster")
+install.packages("hclust")
+install.packages("SnowballC")
+```
+
+
+```{r setup, include=FALSE}
+library(readxl)
+library(dplyr)
+library(data.table)
+library(tm)
+library(tau)
+library(stats)
+library(cluster)
+library(SnowballC)
+```
+
+## R Markdown
+To do:
+Identify all unique tags deanonymize them if possible
+create presence matrix per question id
+create word tag frequency matrix
+tag covariance/tag clustering via chisq test
+
+```{r}
+question_tags<-fread("C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\tag_questions.csv",sep=",",header=T)
+colnames(question_tags)
+tags_dict<-fread("C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\tags.csv",sep=",",header=T)
+colnames(tags_dict)
+question_tags<-inner_join(question_tags,tags_dict, by=c("tag_questions_tag_id"="tags_tag_id"))
+question_tags$tag_questions_tag_id<-NULL
+dim(question_tags)
+length(unique(question_tags$tags_tag_name))
+length(unique(question_tags$tag_questions_question_id))
+tags<-as.data.frame(table(question_tags$tags_tag_name))
+tags<- tags %>% filter(Freq >=100)
+
+questions<-as.data.frame(table(question_tags$tag_questions_question_id))
+
+question_tags<- question_tags %>% 
+  filter(tags_tag_name %in% tags$Var1) %>%
+  filter(tag_questions_question_id %in% questions$Var1)
+tags$root<-substr(tags$Var1,1,4)
+```
+76553 unique question-tag pairs comprising
+7091 semi-unique tags (tags may be misspelled, and not be truly unique)
+23288 semi-unique questions 
+
+After filtering 
+51592 QT pairs
+13580 questions
+948 tags
+
+after stric filtering
+32755 QT pairs
+13580 questions
+143 tags
+
+df is organized such that each row is a pair
+I want a Q by T matrix, where each row is a question and each column is a tag
+each entry is 0 if that tag is not present for the given question and 1 if the tag is present for the given question
+
+```{r}
+question_tags$tags_tag_name<-gsub("-","_",question_tags$tags_tag_name)
+#QT_matrix<-table(question_tags$tag_questions_question_id,question_tags$tags_tag_name)
+TQ_matrix<-table(question_tags$tags_tag_name,question_tags$tag_questions_question_id)
+
+
+write.table(TQ_matrix,"C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\Tag_question_matrix_filtered.csv",sep=",",col.names = T,row.names = T)
+```
+
+```{r}
+TQ_matrix<-fread("C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\Tag_question_matrix_filtered.csv",header=T,sep=",")
+TQ_matrix$root<-substr(TQ_matrix$tagID,1,4)
+TQ_matrix$tagID<-NULL
+test<-aggregate(. ~ root,data=TQ_matrix,sum)
+
+
+write.table(test,"C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\Tag_question_matrix_by_aggregate.csv",sep=",",col.names = T,row.names = F)
+
+test[test != 0] <- 1
+
+write.table(test,"C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\Tag_question_matrix_by_aggregate_floor.csv",sep=",",col.names = T,row.names = F)
+
+```
+
+Create a term matrix for top 5 tags
+
+```{r}
+
+most_liked_tags<-fread("C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\LikesToHighestTags.csv",header=T)
+tags<-most_liked_tags %>% select(-maxLike,-sumLike,-nanswers) %>% mutate(sum = college + career + medicine + business + engineering) %>% filter(sum == 1)
+preKNN<-tags %>% select(-sum)
+preKNN<-melt(data = preKNN,varible=questionID) %>% filter(value == 1)
+
+questions<-fread("C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\questions.csv",header=T) %>% 
+  filter(questions_id %in% preKNN$questionID) %>% 
+  select(questions_id, questions_title)
+questions_term<-tokenize(questions$questions_title) %>% 
+  paste(collapse = " ") %>% 
+  remove_stopwords(stopwords(kind="en"),lines=T)  %>% termFreq(control=list(removePunctuation=T))
+test<-as.data.frame(questions_term)
+
+nwords<-dim(test)[1]
+nquestions<-dim(questions)[1]
+question_term_matrix<-as.data.frame(matrix(0,nrow=nquestions,ncol = nwords))
+rownames(question_term_matrix)<-questions$questions_id
+colnames(question_term_matrix)<-rownames(test)
+for (i in c(1:nquestions)){
+  QI_tokens<-tokenize(questions$questions_title[i]) %>% 
+    paste(collapse = " ") %>% 
+    remove_stopwords(stopwords(kind="en"),lines=T)  %>% 
+    termFreq(control=list(removePunctuation=T)) %>% 
+    as.data.frame()
+  QI_ID<-questions$questions_id[i]
+  question_term_matrix[QI_ID,rownames(QI_tokens)]<-QI_tokens$.
+}
+colnames(preKNN)
+preKNN<-select(preKNN,-value)
+colnames<-c("questionID","class")
+question_term_matrix$questionID<-rownames(question_term_matrix)
+strict<-question_term_matrix[,colSums(question_term_matrix[,colnames(question_term_matrix) != "questionID"])>10]
+strict$questionID<-rownames(strict)
+strict$sum<-rowSums(strict[,colnames(strict) != "questionID"])
+final<-inner_join(strict,preKNN,by="questionID")
+fwrite(final,"C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\questions_term_freq_matrix_strict.csv",col.names = T,row.names = F)
+
+initial<-fread("C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\questions_term_freq_matrix.csv",header=T)
+keep<-initial %>% select(-questionID,-class)
+strict<-keep[,colSums(as.data.frame(keep))>10]
+dim(keep)
+test<-keep[,lapply(.SD,sum)]
+str(strict)
+```
+
+
+Create term matrix for clustered data
+
+```{r}
+names<-fread("C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\Quesion_tag_matrix_filtered_strict.csv",sep=",",header=T,select = "questionID") %>% unlist() %>% as.character()
+complete_header<-c("questionID",names,"clusterID","distance")
+
+clust30<-fread("C:\\Users\\rshoo\\Downloads\\Cluster_30.csv" , header=F,sep=",")
+colnames(clust30)<-complete_header
+dict30<-select(clust30,questionID,clusterID) %>% mutate(clust=paste("Clust",clusterID,sep=""))
+QT_matrix<-fread("C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\Quesion_tag_matrix_filtered_strict.csv",header = T, select="questionID")
+
+questions<-fread("C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\questions.csv",sep=",",header=T,drop="questions_date_added")
+question_tags<-fread("C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\tag_questions.csv",sep=",",header=T)
+colnames(question_tags)
+tags_dict<-fread("C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\tags.csv",sep=",",header=T)
+colnames(tags_dict)
+question_tags<-inner_join(question_tags,tags_dict, by=c("tag_questions_tag_id"="tags_tag_id"))
+question_tags$tags_tag_name<-gsub("-","_",question_tags$tags_tag_name)
+question_tags$tag_questions_tag_id<-NULL
+colnames(question_tags)
+colnames(dict30)
+question_tags<-question_tags %>% inner_join(dict30,by=c("tags_tag_name"="questionID"))
+colnames(questions)
+colnames(question_tags)
+question_tag_clusters<-select(question_tags,tag_questions_question_id,clust) %>% unique()
+questions_single_cluster<-table(question_tag_clusters$tag_questions_question_id) %>% as.data.frame() %>% filter(Freq == 1 )
+question_tag_clusters<-question_tag_clusters %>% filter(tag_questions_question_id %in% questions_single_cluster$Var1)
+test<- questions %>% inner_join(question_tag_clusters,by=c("questions_id" ="tag_questions_question_id"))
+questions<-questions %>% filter(questions_id %in% test$questions_id)
+
+title_terms<-tokenize(questions$questions_title) %>% 
+  paste(collapse = " ") %>% 
+  remove_stopwords(stopwords(kind="en"),lines=T)  %>% termFreq(control=list(removePunctuation=T)) 
+title_terms<-as.data.frame(title_terms)
+title_terms$terms<-rownames(title_terms)
+colnames(title_terms)<-c("Freq","terms")
+
+body_terms<-tokenize(questions$questions_body) %>% 
+  paste(collapse = " ") %>% 
+  remove_stopwords(stopwords(kind="en"),lines=T)  %>% termFreq(control=list(removePunctuation=T))
+body_terms<-as.data.frame(body_terms)
+body_terms$terms<-rownames(body_terms)
+colnames(body_terms)<-c("Freq","terms")
+question_terms<-rbind.data.frame(body_terms,title_terms)
+
+
+str(question_terms)
+terms<-aggregate(x=question_terms$Freq,by=list(question_terms$terms),FUN=sum)
+colnames(terms)<-c("term","freq")
+final_terms<-filter(terms, freq >= 50)
+
+
+nwords<-dim(final_terms)[1]
+nquestions<-dim(questions)[1]
+question_term_matrix<-as.data.frame(matrix(0,nrow=nquestions,ncol = nwords))
+rownames(question_term_matrix)<-questions$questions_id
+colnames(question_term_matrix)<-final_terms$term
+
+for (i in c(1:nquestions)){
+  
+title_tokens<-tokenize(questions$questions_title[i]) %>% 
+  paste(collapse = " ") %>% 
+  remove_stopwords(stopwords(kind="en"),lines=T)  %>% termFreq(control=list(removePunctuation=T)) 
+title_tokens<-as.data.frame(title_tokens)
+title_tokens$tokens<-rownames(title_tokens)
+colnames(title_tokens)<-c("Freq","tokens")
+
+body_tokens<-tokenize(questions$questions_body[i]) %>% 
+  paste(collapse = " ") %>% 
+  remove_stopwords(stopwords(kind="en"),lines=T)  %>% termFreq(control=list(removePunctuation=T))
+body_tokens<-as.data.frame(body_tokens)
+body_tokens$tokens<-rownames(body_tokens)
+colnames(body_tokens)<-c("Freq","tokens")
+question_tokens<-rbind.data.frame(body_tokens,title_tokens)
+tokens<-aggregate(x=question_tokens$Freq,by=list(question_tokens$tokens),FUN=sum)
+colnames(tokens)<-c("tokens","freq")
+tokens<-tokens %>% filter(tokens %in% final_terms$term)
+indices<-as.character(unlist(tokens$tokens))
+
+  QI_ID<-questions$questions_id[i]
+  question_term_matrix[QI_ID,indices]<-tokens$freq
+}
+question_term_matrix$questionID<-rownames(question_term_matrix)
+final<-inner_join(question_term_matrix,question_tag_clusters,by=c("questionID"="tag_questions_question_id"))
+fwrite(final,"C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\Features_by_cluster_strict.csv",col.names = T,sep = ",",row.names = F,quote = F)
+```
+
