@@ -76,22 +76,39 @@ question_tags$tags_tag_name<-gsub("-","_",question_tags$tags_tag_name)
 TQ_matrix<-table(question_tags$tags_tag_name,question_tags$tag_questions_question_id)
 
 
-write.table(TQ_matrix,"C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\Tag_question_matrix_filtered.csv",sep=",",col.names = T,row.names = T)
+write.table(TQ_matrix,"C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\Tag_question_matrix_filtered_strict.csv",sep=",",col.names = T,row.names = T)
 ```
 
+Identify highest used tags matrix
+
 ```{r}
-TQ_matrix<-fread("C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\Tag_question_matrix_filtered.csv",header=T,sep=",")
-TQ_matrix$root<-substr(TQ_matrix$tagID,1,4)
-TQ_matrix$tagID<-NULL
-test<-aggregate(. ~ root,data=TQ_matrix,sum)
+QT_matrix<-fread("C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\Quesion_tag_matrix_filtered_strict.csv",header = T)
+
+tags100frq<-as.character(unlist(tags$Var1))
+tags100frq<-gsub("-","_",tags100frq)
+for_sandy<-QT_matrix %>% select(one_of("questionID",tags100frq))
 
 
-write.table(test,"C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\Tag_question_matrix_by_aggregate.csv",sep=",",col.names = T,row.names = F)
+answers<-fread("C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\answers.csv",sep=",",header=T,drop=c("answers_date_added", "answers_body"))
+answers<-answers %>% filter(answers_question_id %in% questions$questions_id)
 
-test[test != 0] <- 1
 
-write.table(test,"C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\Tag_question_matrix_by_aggregate_floor.csv",sep=",",col.names = T,row.names = F)
+answer_scores<-fread("C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\answer_scores.csv",sep=",",header=T)
+answer_scores<-inner_join(answers,answer_scores, by = c("answers_id" = "id")) %>% as.data.table()
 
+max<-answer_scores[answer_scores[, .I[which.max(score)], by=answers_question_id]$V1]
+colnames(max)
+max$answers_id<-NULL
+max$answers_author_id<-NULL
+colnames(max)<-c("questionID","maxLike")
+sum<-aggregate(answer_scores$score, by=list(answer_scores$answers_question_id), FUN=sum)
+colnames(sum)<-c("questionID","sumLike")
+qfreq<-as.data.frame(table(answer_scores$answers_question_id))
+colnames(qfreq)<-c("questionID","nanswers")
+for_sandy<-for_sandy %>% inner_join(max,by="questionID") %>% inner_join(sum,by="questionID") %>% inner_join(qfreq,by="questionID")
+colnames(for_sandy)
+
+fwrite(for_sandy,"C:\\Users\\rshoo\\OneDrive\\Desktop\\Fall 2019\\stat 403 project\\LikesToHighestTagstags.csv",sep=",",col.names = T,row.names = F,quote = F)
 ```
 
 Create a term matrix for top 5 tags
@@ -143,6 +160,7 @@ test<-keep[,lapply(.SD,sum)]
 str(strict)
 ```
 
+This part comes after clustering
 
 Create term matrix for clustered data
 
